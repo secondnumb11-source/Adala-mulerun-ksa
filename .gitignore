@@ -112,3 +112,11 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/
+
+# Additional environment and credentials
+.env
+.env.*
+*.env
+credentials.json
+*.key
+.credentials
