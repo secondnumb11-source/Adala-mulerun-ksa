@@ -1,5 +1,5 @@
-// منصة العدالة — Najiz content script v2.2
-// Hybrid scraper: combines screen reading + RPA auto-scroll
+// منصة العدالة — Najiz content script v3.0
+// Hybrid scraper: combines screen reading + RPA auto-scroll + lazy-load trigger
 (function () {
   if (window.__ADALA_NAJIZ_LOADED__) return;
   window.__ADALA_NAJIZ_LOADED__ = true;
@@ -8,28 +8,87 @@
   const $all = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // ---------- Auto-scroll full page (down then up) ----------
+  // ---------- Enhanced auto-scroll: triggers lazy-load + full coverage ----------
   async function autoScrollFull() {
     try {
-      const step = Math.max(400, Math.floor(window.innerHeight * 0.85));
-      let last = -1;
-      let stable = 0;
-      // Scroll down
-      for (let i = 0; i < 60; i++) {
-        window.scrollTo({ top: i * step, behavior: "instant" });
-        await sleep(250);
-        const h = document.documentElement.scrollHeight;
-        if (h === last) { stable++; if (stable >= 3) break; } else { stable = 0; last = h; }
-        if (i * step > h + window.innerHeight) break;
+      const vh = window.innerHeight;
+      const step = Math.max(300, Math.floor(vh * 0.75));
+      const DELAY = 350; // wait for lazy-load after each scroll
+
+      // Phase 1: Scroll to top first (reset any previous position)
+      window.scrollTo({ top: 0, behavior: "instant" });
+      await sleep(300);
+
+      // Phase 2: Scroll DOWN slowly to trigger lazy-loaded content
+      let lastHeight = -1;
+      let stableCount = 0;
+      let maxIterations = 80;
+      for (let i = 0; i < maxIterations; i++) {
+        const targetY = (i + 1) * step;
+        window.scrollTo({ top: targetY, behavior: "instant" });
+        await sleep(DELAY);
+
+        const curHeight = document.documentElement.scrollHeight;
+        // If page grew (lazy content loaded), keep going
+        if (curHeight > lastHeight + 50) {
+          stableCount = 0;
+          lastHeight = curHeight;
+        } else {
+          stableCount++;
+          if (stableCount >= 4) break; // content stopped growing
+        }
+        if (targetY > curHeight + vh) break;
       }
-      // Scroll back up
-      for (let y = document.documentElement.scrollHeight; y > 0; y -= step) {
+
+      // Phase 3: Small extra wait for any final lazy loads at the bottom
+      await sleep(600);
+
+      // Phase 4: Scroll BACK UP to the top (completes the full sweep)
+      const finalHeight = document.documentElement.scrollHeight;
+      for (let y = finalHeight; y > 0; y -= step * 2) {
         window.scrollTo({ top: y, behavior: "instant" });
-        await sleep(120);
+        await sleep(80);
       }
       window.scrollTo({ top: 0, behavior: "instant" });
       await sleep(400);
+
+      // Phase 5: If the page uses Angular virtual scroll / pagination, try clicking
+      // "load more" / "التالي" / "show more" buttons
+      await tryLoadMore();
     } catch (e) { console.warn("[adala] scroll failed", e); }
+  }
+
+  // Attempt to click "load more" / pagination buttons to expand all data
+  async function tryLoadMore() {
+    const moreBtns = $all("button, a, [role='button']");
+    for (const btn of moreBtns) {
+      const t = text(btn);
+      if (!t || t.length > 40) continue;
+      const isLoadMore = /تحميل المزيد|عرض المزيد|المزيد|show more|load more|التالي|next/i.test(t);
+      if (isLoadMore) {
+        try {
+          btn.click();
+          await sleep(1500);
+          // Re-scroll after new content loads
+          await autoScrollQuick();
+        } catch {}
+        break; // Only click once per page
+      }
+    }
+  }
+
+  // Quick scroll down to capture any newly loaded content
+  async function autoScrollQuick() {
+    try {
+      const step = Math.max(300, Math.floor(window.innerHeight * 0.7));
+      for (let i = 0; i < 30; i++) {
+        window.scrollTo({ top: (i + 1) * step, behavior: "instant" });
+        await sleep(200);
+        if ((i + 1) * step > document.documentElement.scrollHeight + window.innerHeight) break;
+      }
+      window.scrollTo({ top: 0, behavior: "instant" });
+      await sleep(300);
+    } catch {}
   }
 
   // ---------- Click internal sub-tabs on cases page (القضايا/الأحكام/القرارات) ----------
@@ -355,6 +414,8 @@
   window.__ADALA_NAJIZ__ = {
     detectKindFromUrl,
     autoScrollFull,
+    autoScrollQuick,
+    tryLoadMore,
     clickSubTab,
     // Unified scrape: ALWAYS runs every scraper (hybrid). The kind only hints at primary section.
     async scrape(kindFilter) {
@@ -396,9 +457,10 @@
     const menu = document.createElement("div");
     menu.id = "adala-najiz-menu";
     menu.innerHTML = `
-      <div class="ad-title">⚖️ منصة العدالة — المزامنة الهجينة</div>
-      <button class="ad-primary" id="ad-bot" style="background:linear-gradient(135deg,#1e3a8a,#0a1628);color:#d4af37;border:1.5px solid #d4af37;margin-bottom:8px">🤖 تشغيل البوت التلقائي (كل الصفحات)</button>
-      <button class="ad-primary" data-k="">مزامنة الصفحة الحالية (تمرير + سحب)</button>
+      <div class="ad-title">⚖️ منصة العدالة — المزامنة الهجينة v3.0</div>
+      <button class="ad-primary" id="ad-bot" style="background:linear-gradient(135deg,#16a34a,#065f46);color:#fff;border:1.5px solid #10b981;margin-bottom:6px">🚀 تشغيل البوت (كل الصفحات + التمرير + السحب)</button>
+      <button class="ad-primary" id="ad-cancel" style="display:none;background:rgba(239,68,68,0.2);color:#fca5a5;border:1px solid rgba(239,68,68,0.5);margin-bottom:6px">✋ إيقاف البوت</button>
+      <button class="ad-primary" data-k="">مزامنة الصفحة الحالية فقط</button>
       <div class="ad-grid">
         <button class="ad-chip" data-k="cases">القضايا</button>
         <button class="ad-chip" data-k="sessions">الجلسات</button>
@@ -414,20 +476,30 @@
       s.className = "ad-status show " + cls; s.textContent = msg;
     };
 
+    let fabPoll = null;
     menu.querySelector("#ad-bot").addEventListener("click", async () => {
       try {
         const cfg = await chrome.storage.local.get(["baseUrl", "syncToken"]);
         if (!cfg.baseUrl || !cfg.syncToken) { setS("افتح إعدادات الإضافة وأدخل الرابط والرمز أولاً", "err"); return; }
         setS("🤖 جارٍ تشغيل البوت التلقائي...", "info");
+        menu.querySelector("#ad-cancel").style.display = "block";
         chrome.runtime.sendMessage({ type: "ADALA_AUTOPILOT_START_HERE", baseUrl: cfg.baseUrl, syncToken: cfg.syncToken });
-        const iv = setInterval(async () => {
+        if (fabPoll) clearInterval(fabPoll);
+        fabPoll = setInterval(async () => {
           const r = await chrome.runtime.sendMessage({ type: "ADALA_AUTOPILOT_STATUS" });
           const p = r?.progress; if (!p) return;
-          if (p.finished) { setS("✓ " + (p.message || "اكتمل"), "ok"); clearInterval(iv); }
-          else if (p.error) { setS("⚠️ " + p.error, "err"); clearInterval(iv); }
+          if (p.finished) { setS("✓ " + (p.message || "اكتمل"), "ok"); clearInterval(fabPoll); menu.querySelector("#ad-cancel").style.display = "none"; }
+          else if (p.error) { setS("⚠️ " + p.error, "err"); clearInterval(fabPoll); menu.querySelector("#ad-cancel").style.display = "none"; }
           else if (p.message) setS(`🤖 [${p.currentStep||0}/${p.totalSteps||0}] ${p.message}`, "info");
-        }, 800);
+        }, 1000);
       } catch (e) { setS("خطأ: " + (e?.message || e), "err"); }
+    });
+
+    menu.querySelector("#ad-cancel").addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "ADALA_CANCEL_BOT" });
+      setS("⏹ جارٍ إيقاف البوت...", "info");
+      if (fabPoll) clearInterval(fabPoll);
+      menu.querySelector("#ad-cancel").style.display = "none";
     });
 
     menu.querySelectorAll("[data-k]").forEach((b) => {
@@ -456,5 +528,5 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", injectFab);
   else injectFab();
 
-  console.log("[منصة العدالة v2.2] أداة ناجز جاهزة — نوع الصفحة:", detectKindFromUrl());
+  console.log("[منصة العدالة v3.0] أداة ناجز الهجينة (RPA + قراءة شاشة) جاهزة — نوع الصفحة:", detectKindFromUrl());
 })();

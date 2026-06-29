@@ -202,10 +202,10 @@ function NajizPage() {
 
   return (
     <>
-      <PageHeader
+        <PageHeader
         icon={Network}
         title="تكامل ناجز"
-        subtitle="إضافة المتصفح لسحب القضايا والوكالات والتنفيذ والجلسات تلقائياً"
+        subtitle="أداة هجينة متكاملة (RPA + بوت تلقائي + قراءة شاشة) لسحب القضايا والوكالات والتنفيذ والجلسات تلقائياً"
         action={
           <Button onClick={() => healthCheck.mutate()} disabled={healthCheck.isPending} className="gap-2" variant="outline">
             {healthCheck.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
@@ -237,21 +237,25 @@ function NajizPage() {
         <Card className="card-3d border-none p-6">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h3 className="font-bold text-lg">إضافة متصفح Chrome</h3>
-              <p className="text-xs text-muted-foreground mt-1">حمّل الإضافة، فك ضغطها، ثم حمّلها يدوياً من chrome://extensions/ (وضع المطوّر)</p>
+              <h3 className="font-bold text-lg">إضافة متصفح Chrome v3.0</h3>
+              <p className="text-xs text-muted-foreground mt-1">أداة هجينة متكاملة: بوت RPA يفتح ناجز، ينتظر تسجيل دخولك عبر نفاذ، ثم يسحب جميع البيانات تلقائياً ويرسلها للنظام</p>
             </div>
             <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/10">
               <Download className="h-6 w-6 text-primary" />
             </div>
           </div>
           <ol className="text-xs text-muted-foreground space-y-2 mb-4 pr-4">
-            <li>1. حمّل ملف الإضافة (ZIP)</li>
+            <li>1. حمّل ملف الإضافة (ZIP) وفك ضغطها</li>
             <li>2. أنشئ رمز مزامنة (Sync Token) من اليسار</li>
-            <li>3. ثبّت الإضافة في Chrome (الوضع المطوّر)</li>
-            <li>4. افتح بوابة ناجز وافتح الإضافة، ثم اضغط "سحب البيانات"</li>
+            <li>3. ثبّت الإضافة في Chrome (الوضع المطوّر — chrome://extensions)</li>
+            <li>4. افتح الإضافة، أدخل الرابط والرمز، ثم اضغط <strong>"فتح ناجز وتشغيل البوت"</strong></li>
+            <li>5. البوت يفتح ناجز → ينتظر تسجيل دخولك عبر نفاذ → يسحب كل البيانات تلقائياً</li>
           </ol>
+          <div className="text-[10px] text-muted-foreground bg-primary/5 border border-primary/20 rounded-lg p-2 mb-3">
+            <strong>آلية العمل:</strong> البوت يفتح المتصفح ← ينتظر تسجيل الدخول يدوياً (نفاذ) ← يتنقل تلقائياً بين (القضايا/الأحكام/القرارات/الطلبات/التنفيذ/الوكالات/الجلسات) ← يمرر كل صفحة ← يسحب البيانات ← يرسلها للنظام ← النظام يوزعها على الأقسام المخصصة
+          </div>
           <Button onClick={handleDownload} className="btn-gold gap-2 w-full">
-            <Download className="h-4 w-4" /> تنزيل الإضافة (ZIP)
+            <Download className="h-4 w-4" /> تنزيل الإضافة v3.0 (ZIP)
           </Button>
         </Card>
 

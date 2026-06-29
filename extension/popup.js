@@ -1,4 +1,4 @@
-// منصة العدالة - Najiz sync popup
+// منصة العدالة - Najiz sync popup v3.0
 const $ = (id) => document.getElementById(id);
 const status = (msg, cls = "info") => {
   const el = $("status");
@@ -15,7 +15,6 @@ chrome.storage.local.get(["baseUrl", "syncToken", "lastSync"], (s) => {
     $("lastSync").innerHTML = 'آخر مزامنة: <span class="last-sync">' +
       new Date(s.lastSync).toLocaleString("ar-SA") + '</span>';
   }
-  // Auto-open settings panel if missing config
   if (!s.baseUrl || !s.syncToken) $("settingsPanel").classList.add("open");
 });
 
@@ -30,7 +29,6 @@ $("saveBtn").addEventListener("click", () => {
   if (!/^https?:\/\//.test(baseUrl)) return status("الرابط يجب أن يبدأ بـ https://", "err");
   status("جارٍ التحقق من رابط المزامنة...", "info");
   chrome.runtime.sendMessage({ type: "ADALA_VERIFY_ENDPOINT", baseUrl }, (r) => {
-    // Auto-correct preview URL → stable URL before saving.
     const finalUrl = (r && r.corrected) ? r.corrected : baseUrl;
     if (r && r.changed) $("baseUrl").value = finalUrl;
     chrome.storage.local.set({ baseUrl: finalUrl, syncToken }, () => {
@@ -75,7 +73,6 @@ function countItems(p) {
          (p.documents?.length ?? 0);
 }
 
-// Diagnostic mode: human-readable breakdown of detected items per section.
 function diagnose(p) {
   const parts = [];
   if (p.cases?.length) parts.push(`قضايا: ${p.cases.length}`);
@@ -97,7 +94,7 @@ async function runSync(kindFilter, label) {
     if (!payload) return;
     const n = countItems(payload);
     if (!n) {
-      status("🔎 وضع التشخيص: تم اكتشاف 0 عنصر. الأسباب المحتملة: الصفحة لم تكتمل، أو لم تسجّل الدخول عبر نفاذ، أو هذه ليست الصفحة الصحيحة. مرّر للأسفل حتى تظهر كل الصفوف ثم أعد المحاولة.", "err");
+      status("🔎 تم اكتشاف 0 عنصر. تأكد من اكتمال تحميل الصفحة وتسجيل الدخول.", "err");
       return;
     }
     status(`🔎 تم اكتشاف ${n} عنصر (${diagnose(payload)}) — جارٍ الإرسال...`, "info");
@@ -126,59 +123,113 @@ function disableAll(v) {
   document.querySelectorAll(".chip").forEach((b) => b.disabled = v);
 }
 
-$("syncAllBtn").addEventListener("click", () => runSync(null, "جميع البيانات"));
-document.querySelectorAll(".chip").forEach((btn) => {
-  btn.addEventListener("click", () => runSync(btn.dataset.kind, btn.textContent.trim()));
-});
+function setBotRunningUI(running) {
+  $("cancelBotBtn").style.display = running ? "flex" : "none";
+  $("openNajizBtn").disabled = running;
+  $("autopilotBtn").disabled = running;
+  if (running) disableAll(true);
+  else disableAll(false);
+}
 
-// ---------- Autopilot (RPA bot) ----------
+// ---------- Progress polling ----------
 let progressPoll = null;
-async function startAutopilot() {
-  hideStatus();
-  const cfg = await ensureConfig();
-  if (!cfg) return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url?.includes("najiz.sa")) {
-    status("افتح أولاً منصة ناجز وسجّل دخولك عبر نفاذ، ثم اضغط البوت مرة أخرى", "err");
-    return;
-  }
-  disableAll(true);
-  $("autopilotBtn").disabled = true;
-  status("🤖 جارٍ تشغيل البوت التلقائي...", "info");
 
-  // Start polling progress (background continues after popup closes)
+function startProgressPolling() {
   if (progressPoll) clearInterval(progressPoll);
   progressPoll = setInterval(async () => {
     const r = await chrome.runtime.sendMessage({ type: "ADALA_AUTOPILOT_STATUS" });
     const p = r?.progress;
     if (!p) return;
-    if (p.error) { status("⚠️ " + p.error, "err"); }
-    else if (p.finished) { status("✓ " + (p.message || "اكتمل البوت"), "ok"); clearInterval(progressPoll); disableAll(false); $("autopilotBtn").disabled = false; }
-    else if (p.message) { status(`🤖 [${p.currentStep || 0}/${p.totalSteps || 4}] ${p.message}`, "info"); }
-  }, 800);
+    if (p.error) {
+      status("⚠️ " + p.error, "err");
+      if (p.finished || !r.running) {
+        clearInterval(progressPoll);
+        setBotRunningUI(false);
+      }
+    } else if (p.finished) {
+      status("✓ " + (p.message || "اكتمل البوت"), "ok");
+      clearInterval(progressPoll);
+      setBotRunningUI(false);
+      // Update last sync time
+      const now = new Date().toISOString();
+      $("lastSync").innerHTML = 'آخر مزامنة: <span class="last-sync">' +
+        new Date(now).toLocaleString("ar-SA") + '</span>';
+    } else if (p.message) {
+      status(`🤖 [${p.currentStep || 0}/${p.totalSteps || 7}] ${p.message}`, "info");
+    }
+  }, 1000);
+}
+
+// ---------- Open Najiz & Start Bot (full RPA flow) ----------
+$("openNajizBtn").addEventListener("click", async () => {
+  hideStatus();
+  const cfg = await ensureConfig();
+  if (!cfg) return;
+  setBotRunningUI(true);
+  status("🚀 جارٍ فتح متصفح كروم والانتقال إلى منصة ناجز...", "info");
+
+  // Start progress polling immediately
+  startProgressPolling();
+
+  chrome.runtime.sendMessage({
+    type: "ADALA_OPEN_NAJIZ_AND_BOT",
+    baseUrl: cfg.baseUrl,
+    syncToken: cfg.syncToken,
+  }, (resp) => {
+    if (resp && !resp.ok && resp.error) {
+      status("⚠️ " + resp.error, "err");
+      setBotRunningUI(false);
+      if (progressPoll) clearInterval(progressPoll);
+    }
+  });
+});
+
+// ---------- Cancel bot ----------
+$("cancelBotBtn").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "ADALA_CANCEL_BOT" });
+  status("⏹ جارٍ إيقاف البوت...", "info");
+  setBotRunningUI(false);
+  if (progressPoll) clearInterval(progressPoll);
+});
+
+// ---------- Autopilot (already on Najiz) ----------
+$("autopilotBtn").addEventListener("click", async () => {
+  hideStatus();
+  const cfg = await ensureConfig();
+  if (!cfg) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url?.includes("najiz.sa")) {
+    status("افتح منصة ناجز وسجّل دخولك أولاً، أو استخدم الزر الأخضر أعلاه", "err");
+    return;
+  }
+  setBotRunningUI(true);
+  status("🤖 جارٍ تشغيل البوت التلقائي...", "info");
+  startProgressPolling();
 
   chrome.runtime.sendMessage({
     type: "ADALA_AUTOPILOT_START",
     tabId: tab.id, baseUrl: cfg.baseUrl, syncToken: cfg.syncToken,
   }, (resp) => {
-    if (resp && !resp.ok && resp.error) status("فشل: " + resp.error, "err");
-    setTimeout(() => { disableAll(false); $("autopilotBtn").disabled = false; }, 500);
+    if (resp && !resp.ok && resp.error) {
+      status("⚠️ " + resp.error, "err");
+      setBotRunningUI(false);
+      if (progressPoll) clearInterval(progressPoll);
+    }
   });
-}
-$("autopilotBtn").addEventListener("click", startAutopilot);
+});
 
-// Resume progress display if popup reopens during a run
+// ---------- Manual sync buttons ----------
+$("syncAllBtn").addEventListener("click", () => runSync(null, "جميع البيانات"));
+document.querySelectorAll(".chip").forEach((btn) => {
+  btn.addEventListener("click", () => runSync(btn.dataset.kind, btn.textContent.trim()));
+});
+
+// ---------- Resume progress display if popup reopens during a run ----------
 (async () => {
   const r = await chrome.runtime.sendMessage({ type: "ADALA_AUTOPILOT_STATUS" });
   if (r?.running && r.progress?.message) {
+    setBotRunningUI(true);
     status(`🤖 ${r.progress.message}`, "info");
-    $("autopilotBtn").disabled = true;
-    progressPoll = setInterval(async () => {
-      const x = await chrome.runtime.sendMessage({ type: "ADALA_AUTOPILOT_STATUS" });
-      const p = x?.progress; if (!p) return;
-      if (p.finished) { status("✓ " + (p.message || "اكتمل"), "ok"); clearInterval(progressPoll); $("autopilotBtn").disabled = false; }
-      else if (p.error) { status("⚠️ " + p.error, "err"); clearInterval(progressPoll); $("autopilotBtn").disabled = false; }
-      else if (p.message) { status(`🤖 [${p.currentStep || 0}/${p.totalSteps || 4}] ${p.message}`, "info"); }
-    }, 800);
+    startProgressPolling();
   }
 })();
